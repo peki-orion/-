@@ -72,11 +72,11 @@ class Root(object):
     def __init__(self, **kwargs):
         if os.path.exists(CNN_FEATURE_EXTRACTOR):
             app_logger.info("loading... {}".format(CNN_FEATURE_EXTRACTOR))
-            self.feature_extractor = pickle.load(open(CNN_FEATURE_EXTRACTOR))
+            self.feature_extractor = pickle.load(open(CNN_FEATURE_EXTRACTOR, 'rb'))
             app_logger.info("done")
         else:
             self.feature_extractor = CnnFeatureExtractor(use_gpu, CAFFE_MODEL, MODEL_TYPE, image_feature_dim)
-            pickle.dump(self.feature_extractor, open(CNN_FEATURE_EXTRACTOR, 'w'))
+            pickle.dump(self.feature_extractor, open(CNN_FEATURE_EXTRACTOR, 'wb'), protocol=pickle.HIGHEST_PROTOCOL)
             app_logger.info("pickle.dump finished")
 
         self.agent_service = AgentService(BRICA_CONFIG_FILE, self.feature_extractor)

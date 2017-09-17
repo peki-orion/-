@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 
 import copy
+import math
 import numpy as np
-from chainer import cuda, FunctionSet, Variable, optimizers
+from chainer import cuda, Chain, Variable, optimizers, initializers
 import chainer.functions as F
+import chainer.links as L
 
 from config.log import APP_KEY
 import logging
@@ -32,9 +34,10 @@ class QNet:
         app_logger.info("Initializing Q-Network...")
 
         hidden_dim = 256
-        self.model = FunctionSet(
-            l4=F.Linear(self.dim*self.hist_size, hidden_dim, wscale=np.sqrt(2)),
-            q_value=F.Linear(hidden_dim, self.num_of_actions,
+        self.model = Chain(
+            l4=L.Linear(self.dim*self.hist_size, hidden_dim,
+                        initialW=initializers.Normal(0.5 / math.sqrt(self.dim*self.hist_size))),
+            q_value=L.Linear(hidden_dim, self.num_of_actions,
                              initialW=np.zeros((self.num_of_actions, hidden_dim),
                                                dtype=np.float32))
         )
@@ -44,7 +47,7 @@ class QNet:
         self.model_target = copy.deepcopy(self.model)
 
         self.optimizer = optimizers.RMSpropGraves(lr=0.00025, alpha=0.95, momentum=0.95, eps=0.0001)
-        self.optimizer.setup(self.model.collect_parameters())
+        self.optimizer.setup(self.model)
 
         # History Data :  D=[s, a, r, s_dash, end_episode_flag]
         self.d = [np.zeros((self.data_size, self.hist_size, self.dim), dtype=np.uint8),
@@ -148,7 +151,7 @@ class QNet:
 
     def update_model(self, replayed_experience):
         if replayed_experience[0]:
-            self.optimizer.zero_grads()
+            self.model.zerograds()
             loss, _ = self.forward(replayed_experience[1], replayed_experience[2],
                                         replayed_experience[3], replayed_experience[4], replayed_experience[5])
             loss.backward()

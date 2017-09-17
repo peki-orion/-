@@ -1,6 +1,5 @@
 # coding: utf-8
 
-import copy
 import os
 
 import brica1.gym
@@ -8,8 +7,7 @@ import numpy as np
 import six.moves.cPickle as pickle
 
 from ml.cnn_feature_extractor import CnnFeatureExtractor
-from ml.q_net import QNet
-from ml.experience import Experience
+from ml.agent import Agent
 
 from config.model import CNN_FEATURE_EXTRACTOR, CAFFE_MODEL, MODEL_TYPE
 
@@ -62,32 +60,43 @@ class BGComponent(brica1.Component):
         super(BGComponent, self).__init__()
         self.use_gpu = use_gpu
         self.epsilon = 1.0
-        actions = [0, 1, 2]
-        epsilon_delta = 1.0 / 10 ** 4.4
+        epsilon_decay_steps = 10 ** 4
         min_eps = 0.1
+        actions = [0, 1, 2]
         self.input_dim = n_input
-        self.q_net = QNet(self.use_gpu, actions, self.input_dim, self.epsilon, epsilon_delta, min_eps)
+        self.embedding_dim = 128
+        self.replay_size = 32
+
+        self.agent = Agent(self.use_gpu, self.epsilon, min_eps, epsilon_decay_steps,
+                           self.input_dim, self.embedding_dim, len(actions), self.replay_size)
+
+        self.episode = 0
 
     def start(self):
-        features = self.get_in_port('Isocortex#VVC-BG-Input').buffer
-        action = self.q_net.start(features)
+        self.get_in_port('Isocortex#VVC-BG-Input').buffer
+        action = self.agent.sample_action_space()
         return action
 
     def end(self, reward):  # Episode Terminated
         app_logger.info('episode finished. Reward:{:.1f} / Epsilon:{:.6f}'.format(reward, self.epsilon))
-        self.replayed_experience = self.get_in_port('UB-BG-Input').buffer
-        self.q_net.update_model(self.replayed_experience)
+        reward = self.get_in_port('RB-BG-Input').buffer
+        features = self.get_in_port('Isocortex#VVC-BG-Input').buffer
+        self.get_in_port('UB-BG-Input').buffer
+
+        action, ind, dist, key, eps = self.agent.step(features, self.episode)
+        self.agent.update_memory_and_train(features, action, ind, dist, reward, key, True, self.episode)
+        self.episode = 1
 
     def fire(self):
         reward = self.get_in_port('RB-BG-Input').buffer
         features = self.get_in_port('Isocortex#VVC-BG-Input').buffer
-        self.replayed_experience = self.get_in_port('UB-BG-Input').buffer
+        self.get_in_port('UB-BG-Input').buffer
 
-        action, eps, q_max = self.q_net.step(features)
-        self.q_net.update_model(self.replayed_experience)
+        action, ind, dist, key, eps = self.agent.step(features, self.episode)
+        self.agent.update_memory_and_train(features, action, ind, dist, reward, key, False, self.episode)
 
         app_logger.info('Step:{}  Action:{}  Reward:{:.1f}  Epsilon:{:.6f}  Q_max:{:3f}'.format(
-            self.q_net.time, self.q_net.action_to_index(action), reward[0], eps, q_max
+            self.agent.t, action, reward[0], eps, 1.0  # q_max  # TODO
         ))
 
         self.epsilon = eps
@@ -97,14 +106,8 @@ class BGComponent(brica1.Component):
 class UBComponent(brica1.Component):
     def __init__(self):
         super(UBComponent, self).__init__()
-        self.use_gpu = use_gpu
-        data_size = 10**5
-        replay_size = 32
         hist_size = 1
-        initial_exploration = 10**3
         dim = 10240
-        self.experience = Experience(use_gpu=self.use_gpu, data_size=data_size, replay_size=replay_size,
-                                     hist_size=hist_size, initial_exploration=initial_exploration, dim=dim)
         vvc_input = np.zeros((hist_size, dim), dtype=np.uint8)
         self.last_state = vvc_input
         self.state = vvc_input
@@ -112,18 +115,13 @@ class UBComponent(brica1.Component):
 
     def end(self, action, reward):
         self.time += 1
-        replay_start, s_replay, a_replay, r_replay, s_dash_replay, episode_end_replay = \
-            self.experience.end_episode(self.time, self.last_state, action, reward)
-        self.results['UB-BG-Output'] = [replay_start, s_replay, a_replay, r_replay, s_dash_replay, episode_end_replay]
+        self.results['UB-BG-Output'] = [None, None, None, None, None, None]
 
     def fire(self):
         self.state = self.get_in_port('Isocortex#VVC-UB-Input').buffer
         action, reward = self.get_in_port('Isocortex#FL-UB-Input').buffer
-        self.experience.stock(self.time, self.last_state, action, reward, self.state, False)
-        replay_start, s_replay, a_replay, r_replay, s_dash_replay, episode_end_replay = \
-            self.experience.replay(self.time)
 
-        self.results['UB-BG-Output'] = [replay_start, s_replay, a_replay, r_replay, s_dash_replay, episode_end_replay]
+        self.results['UB-BG-Output'] = [None, None, None, None, None, None]
         self.last_state = self.state.copy()
         self.time += 1
 
