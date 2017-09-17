@@ -47,7 +47,8 @@ class CnnFeatureExtractor:
         self.mean_image = mean_image[:, start:stop, start:stop].copy()
 
     def predict(self, x):
-        y, = self.func(inputs={'data': x}, outputs=[self.outname], train=False)
+        with chainer.no_backprop_mode(), chainer.using_config('train', False):
+            y, = self.func(inputs={'data': x}, outputs=[self.outname])
         return y
 
     def __image_feature(self, camera_image):
@@ -62,7 +63,7 @@ class CnnFeatureExtractor:
         if self.gpu >= 0:
             x_data = cuda.to_gpu(x_data)
 
-        x = chainer.Variable(x_data, volatile=True)
+        x = chainer.Variable(x_data)
         feature = self.predict(x)
 
         if self.gpu >= 0:

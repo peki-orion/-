@@ -15,8 +15,8 @@ class AgentService:
     def __init__(self, config_file, feature_extractor):
         self.feature_extractor = feature_extractor
         self.nb = interpreter.NetworkBuilder()
-        f = open(config_file)
-        self.nb.load_file(f)
+        with open(config_file) as f:
+            self.nb.load_file(f)
         self.agents = {}
         self.schedulers = {}
         self.v1_components = {}     # primary visual cortex
@@ -29,8 +29,10 @@ class AgentService:
 
     def initialize(self, identifier):
         agent_builder = interpreter.AgentBuilder()
+
         # create agetns and schedulers
         self.agents[identifier] = agent_builder.create_agent(self.nb)
+
         modules = agent_builder.get_modules()
         self.schedulers[identifier] = brica1.VirtualTimeScheduler(self.agents[identifier])
 
